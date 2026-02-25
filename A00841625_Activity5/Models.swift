@@ -43,6 +43,7 @@ struct PokemonTypeDTO: Codable {
 }
 
 // MARK: - UI Models
+
 struct PokemonListItem: Identifiable {
     let id = UUID()
     let index: Int
@@ -50,6 +51,11 @@ struct PokemonListItem: Identifiable {
 
     var displayName: String {
         name.prefix(1).uppercased() + name.dropFirst()
+    }
+
+    // Sprite (sin pedir otro endpoint)
+    var spriteURL: URL? {
+        URL(string: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/\(index).png")
     }
 }
 
