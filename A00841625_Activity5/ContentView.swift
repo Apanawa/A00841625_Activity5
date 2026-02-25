@@ -8,8 +8,14 @@
 import SwiftUI
 
 // MARK: - ROOT (Cover -> Pokedex)
+import SwiftUI
+
 struct ContentView: View {
     @State private var isOpen = false
+
+    private let openCloseAnim = Animation.easeInOut(duration: 0.35)
+    private let openCloseTransition: AnyTransition =
+        .opacity.combined(with: .scale(scale: 0.98, anchor: .center))
 
     var body: some View {
         ZStack {
@@ -17,26 +23,27 @@ struct ContentView: View {
 
             if isOpen {
                 PokedexMainView {
-                    withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
+                    withAnimation(openCloseAnim) {
                         isOpen = false
                     }
                 }
-                .transition(.move(edge: .trailing))
+                .transition(openCloseTransition)
             } else {
                 PokedexCoverView {
-                    withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
+                    withAnimation(openCloseAnim) {
                         isOpen = true
                     }
                 }
-                .transition(.move(edge: .leading))
+                .transition(openCloseTransition)
             }
         }
-        .animation(.spring(response: 0.55, dampingFraction: 0.9), value: isOpen)
     }
 }
 
 // MARK: - COVER SCREEN
 private struct PokedexCoverView: View {
+    @State private var pulse = false
+    @State private var pressingOpen = false
     let onOpen: () -> Void
 
     var body: some View {
@@ -93,7 +100,13 @@ private struct PokedexCoverView: View {
             }
             .padding(.horizontal, 18)
 
-            Button(action: onOpen) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.12)) { pressingOpen = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    withAnimation(.easeInOut(duration: 0.12)) { pressingOpen = false }
+                    onOpen()
+                }
+            } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: 20, weight: .semibold))
@@ -108,10 +121,13 @@ private struct PokedexCoverView: View {
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 6)
             }
+            .scaleEffect(pressingOpen ? 0.97 : 1.0)
+            .opacity(pressingOpen ? 0.92 : 1.0)
             .padding(.top, 6)
 
             Spacer()
         }
+        .onAppear { pulse = true }
     }
 }
 
@@ -359,6 +375,8 @@ private struct PokemonDetailView: View {
 // MARK: - GRID CARD
 private struct PokemonGridCard: View {
     let item: PokemonListItem
+    @State private var appeared = false
+    @State private var spritePop = false
 
     var body: some View {
         PokedexCard {
@@ -375,7 +393,14 @@ private struct PokemonGridCard: View {
                                 ProgressView()
                             case .success(let img):
                                 img.resizable().scaledToFit()
-                                    .frame(height: 92)
+                                    .frame(height: 180)
+                                    .scaleEffect(spritePop ? 1.0 : 0.90)
+                                    .opacity(spritePop ? 1.0 : 0.70)
+                                    .onAppear {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            spritePop = true
+                                        }
+                                    }
                             case .failure:
                                 Image(systemName: "photo")
                                     .foregroundStyle(PokedexTheme.secondaryText)
@@ -397,9 +422,18 @@ private struct PokemonGridCard: View {
             }
             .frame(maxWidth: .infinity)
         }
+        .opacity(appeared ? 1 : 0)
+        .scaleEffect(appeared ? 1.0 : 0.96)
+        .offset(y: appeared ? 0 : 10)
+        .onAppear {
+            // delay chiquito para que entren escalonadas (clean)
+            let d = Double(item.index % 10) * 0.03
+            withAnimation(.easeOut(duration: 0.28).delay(d)) {
+                appeared = true
+            }
+        }
     }
 }
-
 // MARK: - SMALL UI PIECES
 private struct PokedexTopBar: View {
     let title: String
@@ -490,10 +524,13 @@ private struct ScanOverlay: View {
             VStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(PokedexTheme.blueLight.opacity(0.25))
-                        .frame(width: 120, height: 120)
-                        .scaleEffect(pulse ? 1.12 : 0.92)
-                        .opacity(pulse ? 0.7 : 0.4)
+                        .fill(PokedexTheme.blueLight)
+                        .frame(width: 54, height: 54)
+                        .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 4))
+                        .shadow(color: PokedexTheme.blueLight.opacity(pulse ? 0.65 : 0.25),
+                                radius: pulse ? 18 : 8)
+                        .scaleEffect(pulse ? 1.05 : 0.96)
+                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
 
                     Circle()
                         .stroke(PokedexTheme.blueLight, lineWidth: 4)

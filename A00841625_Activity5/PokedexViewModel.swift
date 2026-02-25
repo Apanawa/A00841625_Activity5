@@ -38,6 +38,7 @@ final class PokemonDetailViewModel: ObservableObject {
     @Published private(set) var pokemon: PokemonDetail? = nil
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
+    @Published var spritePop = false
 
     private let service = PokeAPIService()
 
@@ -66,3 +67,4 @@ final class PokemonDetailViewModel: ObservableObject {
         isLoading = false
     }
 }
+
