@@ -7,7 +7,118 @@
 
 import SwiftUI
 
+// MARK: - ROOT (Cover -> Pokedex)
 struct ContentView: View {
+    @State private var isOpen = false
+
+    var body: some View {
+        ZStack {
+            PokedexTheme.background.ignoresSafeArea()
+
+            if isOpen {
+                PokedexMainView {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
+                        isOpen = false
+                    }
+                }
+                .transition(.move(edge: .trailing))
+            } else {
+                PokedexCoverView {
+                    withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
+                        isOpen = true
+                    }
+                }
+                .transition(.move(edge: .leading))
+            }
+        }
+        .animation(.spring(response: 0.55, dampingFraction: 0.9), value: isOpen)
+    }
+}
+
+// MARK: - COVER SCREEN
+private struct PokedexCoverView: View {
+    let onOpen: () -> Void
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Spacer()
+
+            // Pokédex "cuerpo"
+            ZStack {
+                RoundedRectangle(cornerRadius: 26)
+                    .fill(PokedexTheme.red)
+                    .frame(height: 280)
+                    .shadow(color: .black.opacity(0.35), radius: 18, x: 0, y: 10)
+
+                VStack(spacing: 14) {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(PokedexTheme.blueLight)
+                            .frame(width: 54, height: 54)
+                            .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 4))
+
+                        HStack(spacing: 10) {
+                            Circle().fill(PokedexTheme.redLight).frame(width: 14, height: 14)
+                            Circle().fill(PokedexTheme.yellowLight).frame(width: 14, height: 14)
+                            Circle().fill(PokedexTheme.greenLight).frame(width: 14, height: 14)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+
+                    Spacer()
+
+                    // Pantalla
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(PokedexTheme.screen.opacity(0.35))
+                        .frame(height: 120)
+                        .overlay {
+                            VStack(spacing: 8) {
+                                Text("MINI POKÉDEX")
+                                    .font(.system(.title2, design: .rounded))
+                                    .bold()
+                                    .foregroundStyle(.white)
+
+                                Text("Presiona para abrir")
+                                    .font(.system(.subheadline, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                        .padding(.horizontal, 20)
+
+                    Spacer(minLength: 14)
+                }
+            }
+            .padding(.horizontal, 18)
+
+            Button(action: onOpen) {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                    Text("ABRIR POKÉDEX")
+                        .font(.system(.headline, design: .rounded))
+                        .bold()
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .background(PokedexTheme.red)
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 6)
+            }
+            .padding(.top, 6)
+
+            Spacer()
+        }
+    }
+}
+
+// MARK: - MAIN POKEDEX (GRID + SCAN + CLOSE)
+private struct PokedexMainView: View {
+    let onClose: () -> Void
+
     @StateObject private var vm = PokedexViewModel()
     @State private var searchText: String = ""
 
@@ -56,6 +167,38 @@ struct ContentView: View {
                         }
                     }
                 }
+
+                // SCAN button
+                Button {
+                    startScan()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "viewfinder")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("SCAN")
+                            .font(.system(.headline, design: .rounded))
+                            .bold()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(PokedexTheme.blueLight.opacity(0.95))
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.35), radius: 12, x: 0, y: 8)
+                }
+                .padding(.trailing, 16)
+                .padding(.bottom, 16)
+                .disabled(vm.pokemonList.isEmpty || isScanning)
+
+                // Scan overlay
+                if isScanning {
+                    ScanOverlay()
+                        .transition(.opacity)
+                }
+            }
+            // Navegación programática post-scan
+            .navigationDestination(item: $scannedPokemon) { p in
+                PokemonDetailView(name: p.name, index: p.index)
             }
             .navigationBarHidden(true)
             .task {
