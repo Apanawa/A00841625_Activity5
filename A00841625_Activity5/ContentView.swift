@@ -8,8 +8,14 @@
 import SwiftUI
 
 // MARK: - ROOT (Cover -> Pokedex)
+import SwiftUI
+
 struct ContentView: View {
     @State private var isOpen = false
+
+    private let openCloseAnim = Animation.easeInOut(duration: 0.35)
+    private let openCloseTransition: AnyTransition =
+        .opacity.combined(with: .scale(scale: 0.98, anchor: .center))
 
     var body: some View {
         ZStack {
@@ -17,26 +23,27 @@ struct ContentView: View {
 
             if isOpen {
                 PokedexMainView {
-                    withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
+                    withAnimation(openCloseAnim) {
                         isOpen = false
                     }
                 }
-                .transition(.move(edge: .trailing))
+                .transition(openCloseTransition)
             } else {
                 PokedexCoverView {
-                    withAnimation(.spring(response: 0.55, dampingFraction: 0.9)) {
+                    withAnimation(openCloseAnim) {
                         isOpen = true
                     }
                 }
-                .transition(.move(edge: .leading))
+                .transition(openCloseTransition)
             }
         }
-        .animation(.spring(response: 0.55, dampingFraction: 0.9), value: isOpen)
     }
 }
 
 // MARK: - COVER SCREEN
 private struct PokedexCoverView: View {
+    @State private var pulse = false
+    @State private var pressingOpen = false
     let onOpen: () -> Void
 
     var body: some View {
@@ -93,7 +100,13 @@ private struct PokedexCoverView: View {
             }
             .padding(.horizontal, 18)
 
-            Button(action: onOpen) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.12)) { pressingOpen = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    withAnimation(.easeInOut(duration: 0.12)) { pressingOpen = false }
+                    onOpen()
+                }
+            } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: 20, weight: .semibold))
@@ -108,10 +121,13 @@ private struct PokedexCoverView: View {
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.30), radius: 10, x: 0, y: 6)
             }
+            .scaleEffect(pressingOpen ? 0.97 : 1.0)
+            .opacity(pressingOpen ? 0.92 : 1.0)
             .padding(.top, 6)
 
             Spacer()
         }
+        .onAppear { pulse = true }
     }
 }
 
@@ -122,48 +138,69 @@ private struct PokedexMainView: View {
     @StateObject private var vm = PokedexViewModel()
     @State private var searchText: String = ""
 
+    @State private var isScanning = false
+    private struct ScannedSelection: Identifiable, Hashable {
+        let id = UUID()
+        let name: String
+        let index: Int
+    }
+
+    @State private var scannedPokemon: ScannedSelection? = nil
+
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
     private var filtered: [PokemonListItem] {
-        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return vm.pokemonList }
-        let q = searchText.lowercased()
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty { return vm.pokemonList }
         return vm.pokemonList.filter { $0.name.lowercased().contains(q) }
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .bottomTrailing) {
                 PokedexTheme.background.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    PokedexHeader(title: "Mini Pokédex")
+                    PokedexTopBar(title: "Mini Pokédex", onClose: onClose)
 
-                    Group {
-                        if vm.isLoading && vm.pokemonList.isEmpty {
-                            VStack(spacing: 12) {
-                                ProgressView()
-                                Text("Cargando Pokédex…")
-                                    .foregroundStyle(PokedexTheme.secondaryText)
-                            }
-                            .padding(.top, 40)
-                        } else if let error = vm.errorMessage, vm.pokemonList.isEmpty {
-                            PokedexErrorCard(message: error) {
-                                Task { await vm.loadPokemonList() }
-                            }
-                            .padding(.top, 24)
-                        } else {
-                            ScrollView {
-                                LazyVStack(spacing: 12) {
-                                    ForEach(filtered) { p in
-                                        NavigationLink {
-                                            PokemonDetailView(name: p.name, index: p.index)
-                                        } label: {
-                                            PokemonCardRow(item: p)
-                                        }
-                                        .buttonStyle(.plain)
+                    SearchBar(text: $searchText)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 10)
+
+                    if vm.isLoading && vm.pokemonList.isEmpty {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Cargando Pokémon…")
+                                .foregroundStyle(PokedexTheme.secondaryText)
+                        }
+                        .padding(.top, 40)
+
+                    } else if let error = vm.errorMessage, vm.pokemonList.isEmpty {
+                        PokedexErrorCard(message: error) {
+                            Task { await vm.loadPokemonList() }
+                        }
+                        .padding(.top, 22)
+
+                    } else {
+                        ScrollView {
+                            LazyVGrid(columns: columns, spacing: 12) {
+                                ForEach(filtered) { p in
+                                    NavigationLink {
+                                        PokemonDetailView(name: p.name, index: p.index)
+                                    } label: {
+                                        PokemonGridCard(item: p)
                                     }
+                                    .buttonStyle(.plain)
                                 }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 16)
                             }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 16)
+                        }
+                        .refreshable {
+                            await vm.loadPokemonList()
                         }
                     }
                 }
@@ -200,65 +237,32 @@ private struct PokedexMainView: View {
             .navigationDestination(item: $scannedPokemon) { p in
                 PokemonDetailView(name: p.name, index: p.index)
             }
-            .navigationBarHidden(true)
             .task {
-                if vm.pokemonList.isEmpty { await vm.loadPokemonList() }
+                if vm.pokemonList.isEmpty {
+                    await vm.loadPokemonList()
+                }
             }
         }
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always), prompt: "Buscar Pokémon")
     }
-}
 
-private struct PokemonCardRow: View {
-    let item: PokemonListItem
+    private func startScan() {
+        guard !vm.pokemonList.isEmpty else { return }
+        isScanning = true
 
-    var body: some View {
-        PokedexCard {
-            HStack(spacing: 12) {
-                // Sprite
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(PokedexTheme.screen.opacity(0.25))
-                        .frame(width: 64, height: 64)
+        let pool = filtered.isEmpty ? vm.pokemonList : filtered
+        let pick = pool.randomElement()
 
-                    if let url = item.spriteURL {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .empty:
-                                ProgressView().scaleEffect(0.9)
-                            case .success(let img):
-                                img.resizable().scaledToFit()
-                                    .frame(width: 54, height: 54)
-                            case .failure:
-                                Image(systemName: "photo")
-                                    .foregroundStyle(PokedexTheme.secondaryText)
-                            @unknown default:
-                                EmptyView()
-                            }
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.displayName)
-                        .font(.system(.headline, design: .rounded))
-                        .foregroundStyle(PokedexTheme.text)
-
-                    Text(String(format: "#%03d", item.index))
-                        .font(.system(.subheadline, design: .monospaced))
-                        .foregroundStyle(PokedexTheme.secondaryText)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(PokedexTheme.secondaryText)
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000) // 0.9s
+            isScanning = false
+            if let pick {
+                scannedPokemon = ScannedSelection(name: pick.name, index: pick.index)
             }
         }
     }
 }
 
+// MARK: - DETAIL (misma idea, estilo “pantalla”)
 private struct PokemonDetailView: View {
     let name: String
     let index: Int
@@ -273,8 +277,7 @@ private struct PokemonDetailView: View {
             PokedexTheme.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 16) {
-                    // Header tipo “pantalla” de Pokédex
+                VStack(spacing: 14) {
                     PokedexCard {
                         VStack(spacing: 12) {
                             RoundedRectangle(cornerRadius: 16)
@@ -311,19 +314,19 @@ private struct PokemonDetailView: View {
                         }
                     }
                     .padding(.horizontal, 14)
-                    .padding(.top, 10)
+                    .padding(.top, 12)
 
                     if vm.isLoading {
                         ProgressView("Cargando…")
                             .foregroundStyle(PokedexTheme.secondaryText)
-                            .padding(.top, 20)
+                            .padding(.top, 18)
                     } else if let error = vm.errorMessage {
                         PokedexErrorCard(message: error) {
                             Task { await vm.load(name: name) }
                         }
                         .padding(.horizontal, 14)
                     } else if let p = vm.pokemon {
-                        // Tipos
+
                         PokedexCard {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Tipos")
@@ -337,7 +340,7 @@ private struct PokemonDetailView: View {
                                             .foregroundStyle(PokedexTheme.text)
                                             .padding(.horizontal, 10)
                                             .padding(.vertical, 6)
-                                            .background(PokedexTheme.chip)
+                                            .background(PokedexTheme.chip) // neutro (sin colores por tipo)
                                             .clipShape(Capsule())
                                     }
                                 }
@@ -345,7 +348,6 @@ private struct PokemonDetailView: View {
                         }
                         .padding(.horizontal, 14)
 
-                        // Info básica
                         PokedexCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Información")
@@ -370,6 +372,192 @@ private struct PokemonDetailView: View {
     }
 }
 
+// MARK: - GRID CARD
+private struct PokemonGridCard: View {
+    let item: PokemonListItem
+    @State private var appeared = false
+    @State private var spritePop = false
+
+    var body: some View {
+        PokedexCard {
+            VStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(PokedexTheme.screen.opacity(0.30))
+                        .frame(height: 110)
+
+                    if let url = URL(string: "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/\(item.index).png") {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView()
+                            case .success(let img):
+                                img.resizable().scaledToFit()
+                                    .frame(height: 180)
+                                    .scaleEffect(spritePop ? 1.0 : 0.90)
+                                    .opacity(spritePop ? 1.0 : 0.70)
+                                    .onAppear {
+                                        withAnimation(.easeOut(duration: 0.25)) {
+                                            spritePop = true
+                                        }
+                                    }
+                            case .failure:
+                                Image(systemName: "photo")
+                                    .foregroundStyle(PokedexTheme.secondaryText)
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                    }
+                }
+
+                Text(item.displayName)
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(PokedexTheme.text)
+                    .lineLimit(1)
+
+                Text(String(format: "#%03d", item.index))
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(PokedexTheme.secondaryText)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .opacity(appeared ? 1 : 0)
+        .scaleEffect(appeared ? 1.0 : 0.96)
+        .offset(y: appeared ? 0 : 10)
+        .onAppear {
+            // delay chiquito para que entren escalonadas (clean)
+            let d = Double(item.index % 10) * 0.03
+            withAnimation(.easeOut(duration: 0.28).delay(d)) {
+                appeared = true
+            }
+        }
+    }
+}
+// MARK: - SMALL UI PIECES
+private struct PokedexTopBar: View {
+    let title: String
+    let onClose: () -> Void
+
+    var body: some View {
+        ZStack {
+            PokedexTheme.red
+                .frame(height: 110)
+                .overlay(alignment: .topLeading) {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(PokedexTheme.blueLight)
+                            .frame(width: 42, height: 42)
+                            .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 3))
+
+                        HStack(spacing: 8) {
+                            Circle().fill(PokedexTheme.redLight).frame(width: 12, height: 12)
+                            Circle().fill(PokedexTheme.yellowLight).frame(width: 12, height: 12)
+                            Circle().fill(PokedexTheme.greenLight).frame(width: 12, height: 12)
+                        }
+
+                        Spacer()
+
+                        Button(action: onClose) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.95))
+                        }
+                    }
+                    .padding(.top, 16)
+                    .padding(.horizontal, 16)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    Text(title)
+                        .font(.system(.title2, design: .rounded))
+                        .bold()
+                        .foregroundStyle(.white)
+                        .padding(.leading, 16)
+                        .padding(.bottom, 12)
+                }
+
+            Rectangle()
+                .fill(.black.opacity(0.35))
+                .frame(height: 6)
+                .offset(y: 55)
+        }
+    }
+}
+
+private struct SearchBar: View {
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(PokedexTheme.secondaryText)
+
+            TextField("Buscar Pokémon…", text: $text)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+                .foregroundStyle(PokedexTheme.text)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(PokedexTheme.secondaryText)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(PokedexTheme.card)
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.10), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+private struct ScanOverlay: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.55).ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(PokedexTheme.blueLight)
+                        .frame(width: 54, height: 54)
+                        .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 4))
+                        .shadow(color: PokedexTheme.blueLight.opacity(pulse ? 0.65 : 0.25),
+                                radius: pulse ? 18 : 8)
+                        .scaleEffect(pulse ? 1.05 : 0.96)
+                        .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+
+                    Circle()
+                        .stroke(PokedexTheme.blueLight, lineWidth: 4)
+                        .frame(width: 80, height: 80)
+
+                    Image(systemName: "viewfinder")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+
+                Text("Escaneando…")
+                    .font(.system(.headline, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .padding(24)
+            .background(PokedexTheme.card)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(color: .black.opacity(0.35), radius: 16, x: 0, y: 10)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
 private struct InfoRow: View {
     let title: String
     let value: String
@@ -387,51 +575,6 @@ private struct InfoRow: View {
     }
 }
 
-// MARK: - Header (lucecitas estilo pokédex)
-private struct PokedexHeader: View {
-    let title: String
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .bottom) {
-                PokedexTheme.red
-                    .frame(height: 120)
-                    .overlay(alignment: .topLeading) {
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(PokedexTheme.blueLight)
-                                .frame(width: 44, height: 44)
-                                .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 3))
-
-                            HStack(spacing: 8) {
-                                Circle().fill(PokedexTheme.redLight).frame(width: 12, height: 12)
-                                Circle().fill(PokedexTheme.yellowLight).frame(width: 12, height: 12)
-                                Circle().fill(PokedexTheme.greenLight).frame(width: 12, height: 12)
-                            }
-                        }
-                        .padding(.top, 18)
-                        .padding(.leading, 16)
-                    }
-                    .overlay(alignment: .bottomLeading) {
-                        Text(title)
-                            .font(.system(.title2, design: .rounded))
-                            .bold()
-                            .foregroundStyle(.white)
-                            .padding(.leading, 16)
-                            .padding(.bottom, 14)
-                    }
-
-                // Línea negra tipo separación
-                Rectangle()
-                    .fill(.black.opacity(0.35))
-                    .frame(height: 6)
-                    .offset(y: 3)
-            }
-        }
-    }
-}
-
-// MARK: - Card reusable (pantalla/tarjeta)
 private struct PokedexCard<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -477,7 +620,7 @@ private struct PokedexErrorCard: View {
     }
 }
 
-// MARK: - Theme
+// MARK: - THEME
 private enum PokedexTheme {
     static let background = Color(red: 0.07, green: 0.08, blue: 0.10)
     static let card = Color(red: 0.12, green: 0.13, blue: 0.16)
@@ -494,3 +637,4 @@ private enum PokedexTheme {
     static let yellowLight = Color(red: 0.98, green: 0.80, blue: 0.25)
     static let greenLight = Color(red: 0.35, green: 0.85, blue: 0.45)
 }
+
